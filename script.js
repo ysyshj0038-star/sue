@@ -1,60 +1,261 @@
-document.documentElement.classList.add("js");
+const referenceDate = new Date("2026-07-06T00:00:00+09:00");
 
-const progressBar = document.querySelector(".scroll-progress");
-const navLinks = [...document.querySelectorAll(".site-nav a")];
-const sections = navLinks
-  .map((link) => document.querySelector(link.getAttribute("href")))
-  .filter(Boolean);
-const revealElements = document.querySelectorAll(".reveal");
+const events = [
+  { start: "2026-06-09", end: "2026-06-15", title: "기말고사" },
+  { start: "2026-06-16", end: "2026-06-22", title: "보강기간" },
+  { start: "2026-06-22", end: "2026-07-03", title: "재입학 신청기간" },
+  { start: "2026-06-23", end: "2026-07-06", title: "하계 계절학기" },
+  { start: "2026-06-23", end: "2026-08-31", title: "미등록 휴학기간" },
+  { start: "2026-06-23", end: "2026-06-23", title: "하계방학" },
+  { start: "2026-06-25", end: "2026-06-30", title: "성적공시 및 정정" },
+  { start: "2026-07-13", end: "2026-08-31", title: "휴학연기 신청기간" },
+  { start: "2026-07-13", end: "2026-07-17", title: "복학기간" },
+  { start: "2026-07-29", end: "2026-07-31", title: "예비수강 신청기간" },
+];
 
-function updateScrollProgress() {
-  const scrollableHeight = document.documentElement.scrollHeight - window.innerHeight;
-  const progress = scrollableHeight > 0 ? (window.scrollY / scrollableHeight) * 100 : 0;
-  progressBar.style.width = `${Math.min(progress, 100)}%`;
+const state = {
+  filter: "all",
+  search: "",
+};
+
+const formatDate = new Intl.DateTimeFormat("ko-KR", {
+  month: "long",
+  day: "numeric",
+  weekday: "short",
+});
+
+const formatShortDate = new Intl.DateTimeFormat("ko-KR", {
+  month: "2-digit",
+  day: "2-digit",
+});
+
+const monthFormat = new Intl.DateTimeFormat("ko-KR", {
+  month: "long",
+});
+
+const elements = {
+  totalCount: document.querySelector("#totalCount"),
+  activeCount: document.querySelector("#activeCount"),
+  upcomingCount: document.querySelector("#upcomingCount"),
+  longestDays: document.querySelector("#longestDays"),
+  longestTitle: document.querySelector("#longestTitle"),
+  todayLabel: document.querySelector("#todayLabel"),
+  todayHint: document.querySelector("#todayHint"),
+  timeline: document.querySelector("#timeline"),
+  resultCount: document.querySelector("#resultCount"),
+  monthList: document.querySelector("#monthList"),
+  focusGrid: document.querySelector("#focusGrid"),
+  searchInput: document.querySelector("#searchInput"),
+  filterButtons: document.querySelectorAll(".filter-button"),
+};
+
+function toDate(value) {
+  return new Date(`${value}T00:00:00+09:00`);
 }
 
-function updateActiveNav() {
-  let currentSection = null;
+function daysBetween(start, end) {
+  const oneDay = 24 * 60 * 60 * 1000;
+  return Math.round((end - start) / oneDay) + 1;
+}
 
-  for (let index = sections.length - 1; index >= 0; index -= 1) {
-    const section = sections[index];
-    const sectionTop = section.offsetTop - 140;
+function getStatus(event) {
+  const start = toDate(event.start);
+  const end = toDate(event.end);
 
-    if (window.scrollY >= sectionTop) {
-      currentSection = section;
-      break;
-    }
+  if (referenceDate < start) {
+    return "upcoming";
   }
 
-  navLinks.forEach((link) => {
-    const isActive = currentSection && link.getAttribute("href") === `#${currentSection.id}`;
-    link.classList.toggle("is-active", Boolean(isActive));
+  if (referenceDate > end) {
+    return "done";
+  }
+
+  if (referenceDate.getTime() === start.getTime() || referenceDate.getTime() === end.getTime()) {
+    return "today";
+  }
+
+  return "active";
+}
+
+function getStatusLabel(status) {
+  const labels = {
+    active: "진행 중",
+    today: "오늘 포함",
+    upcoming: "예정",
+    done: "종료",
+  };
+
+  return labels[status];
+}
+
+function getDurationText(event) {
+  const start = toDate(event.start);
+  const end = toDate(event.end);
+  const duration = daysBetween(start, end);
+  return duration === 1 ? "하루 일정" : `${duration}일간 진행`;
+}
+
+function getDateRange(event) {
+  const start = toDate(event.start);
+  const end = toDate(event.end);
+
+  if (event.start === event.end) {
+    return formatDate.format(start);
+  }
+
+  return `${formatShortDate.format(start)} - ${formatShortDate.format(end)}`;
+}
+
+function getDayDistance(event) {
+  const status = getStatus(event);
+  const start = toDate(event.start);
+  const end = toDate(event.end);
+  const oneDay = 24 * 60 * 60 * 1000;
+
+  if (status === "upcoming") {
+    const days = Math.ceil((start - referenceDate) / oneDay);
+    return `${days}일 후 시작`;
+  }
+
+  if (status === "done") {
+    const days = Math.ceil((referenceDate - end) / oneDay);
+    return `${days}일 전 종료`;
+  }
+
+  const remaining = Math.ceil((end - referenceDate) / oneDay);
+  return remaining === 0 ? "오늘 종료" : `${remaining}일 남음`;
+}
+
+function enrichEvents() {
+  return events
+    .map((event) => ({
+      ...event,
+      status: getStatus(event),
+      duration: daysBetween(toDate(event.start), toDate(event.end)),
+    }))
+    .sort((a, b) => toDate(a.start) - toDate(b.start));
+}
+
+function renderSummary(enrichedEvents) {
+  const activeStatuses = new Set(["active", "today"]);
+  const active = enrichedEvents.filter((event) => activeStatuses.has(event.status));
+  const upcoming = enrichedEvents.filter((event) => event.status === "upcoming");
+  const longest = enrichedEvents.reduce((current, event) => (
+    event.duration > current.duration ? event : current
+  ), enrichedEvents[0]);
+
+  elements.todayLabel.textContent = "2026.07.06";
+  elements.todayHint.textContent = "스프레드시트 기준 일정 상태를 계산합니다.";
+  elements.totalCount.textContent = enrichedEvents.length;
+  elements.activeCount.textContent = active.length;
+  elements.upcomingCount.textContent = upcoming.length;
+  elements.longestDays.textContent = `${longest.duration}일`;
+  elements.longestTitle.textContent = longest.title;
+}
+
+function renderMonths(enrichedEvents) {
+  const months = enrichedEvents.reduce((accumulator, event) => {
+    const monthKey = `${toDate(event.start).getMonth() + 1}`;
+    const monthName = monthFormat.format(toDate(event.start));
+    accumulator[monthKey] = accumulator[monthKey] || { name: monthName, count: 0 };
+    accumulator[monthKey].count += 1;
+    return accumulator;
+  }, {});
+
+  elements.monthList.innerHTML = Object.values(months)
+    .map((month) => `
+      <div class="month-item">
+        <strong>${month.name}</strong>
+        <span>${month.count}개 일정</span>
+      </div>
+    `)
+    .join("");
+}
+
+function getFilteredEvents(enrichedEvents) {
+  const normalizedSearch = state.search.trim().toLowerCase();
+
+  return enrichedEvents.filter((event) => {
+    const statusMatches = state.filter === "all"
+      || event.status === state.filter
+      || (state.filter === "active" && event.status === "today");
+    const searchMatches = !normalizedSearch
+      || event.title.toLowerCase().includes(normalizedSearch);
+
+    return statusMatches && searchMatches;
   });
 }
 
-const revealObserver = new IntersectionObserver(
-  (entries) => {
-    entries.forEach((entry) => {
-      if (entry.isIntersecting) {
-        entry.target.classList.add("is-visible");
-        revealObserver.unobserve(entry.target);
-      }
-    });
-  },
-  {
-    threshold: 0.12,
-    rootMargin: "0px 0px -80px 0px",
-  },
-);
+function renderTimeline(filteredEvents) {
+  elements.resultCount.textContent = `${filteredEvents.length}개 일정`;
 
-revealElements.forEach((element) => revealObserver.observe(element));
+  if (filteredEvents.length === 0) {
+    elements.timeline.innerHTML = `
+      <div class="empty-state">
+        조건에 맞는 일정이 없습니다. 검색어나 필터를 다시 확인해 주세요.
+      </div>
+    `;
+    return;
+  }
 
-window.addEventListener("scroll", () => {
-  updateScrollProgress();
-  updateActiveNav();
+  elements.timeline.innerHTML = filteredEvents
+    .map((event) => `
+      <article class="event-card">
+        <div class="event-date">
+          <strong>${getDateRange(event)}</strong>
+          <span>${getDurationText(event)}</span>
+        </div>
+        <div class="event-body">
+          <h3>${event.title}</h3>
+          <p>${getDayDistance(event)}</p>
+        </div>
+        <div class="event-meta">
+          <span class="badge ${event.status}">${getStatusLabel(event.status)}</span>
+        </div>
+      </article>
+    `)
+    .join("");
+}
+
+function renderFocus(enrichedEvents) {
+  const activeStatuses = new Set(["active", "today"]);
+  const focusEvents = enrichedEvents
+    .filter((event) => activeStatuses.has(event.status) || event.status === "upcoming")
+    .slice(0, 3);
+
+  elements.focusGrid.innerHTML = focusEvents
+    .map((event) => `
+      <article class="focus-card">
+        <span class="badge ${event.status}">${getStatusLabel(event.status)}</span>
+        <h3>${event.title}</h3>
+        <p>${getDateRange(event)} · ${getDayDistance(event)}</p>
+      </article>
+    `)
+    .join("");
+}
+
+function render() {
+  const enrichedEvents = enrichEvents();
+  const filteredEvents = getFilteredEvents(enrichedEvents);
+
+  renderSummary(enrichedEvents);
+  renderMonths(enrichedEvents);
+  renderTimeline(filteredEvents);
+  renderFocus(enrichedEvents);
+}
+
+elements.searchInput.addEventListener("input", (event) => {
+  state.search = event.target.value;
+  render();
 });
 
-window.addEventListener("resize", updateScrollProgress);
+elements.filterButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    state.filter = button.dataset.filter;
+    elements.filterButtons.forEach((item) => item.classList.remove("is-selected"));
+    button.classList.add("is-selected");
+    render();
+  });
+});
 
-updateScrollProgress();
-updateActiveNav();
+render();
